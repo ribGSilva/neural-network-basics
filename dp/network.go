@@ -1,10 +1,11 @@
 package dp
 
 import (
-	"gonum.org/v1/gonum/floats"
-	"gonum.org/v1/gonum/mat"
 	"math"
 	"math/rand/v2"
+
+	"gonum.org/v1/gonum/floats"
+	"gonum.org/v1/gonum/mat"
 )
 
 type NeuralNetwork struct {
@@ -59,8 +60,29 @@ func (nn *NeuralNetwork) FeedForward(input *mat.Dense) *mat.Dense {
 	return data
 }
 
-// BackPropagate does the calculation of the gradient for each layer, and apply the alfa scalar to both wight and biases
+// applyLayer performs the calculation for a neural network layer over an input
+func applyLayer(input mat.Matrix, weight mat.Matrix, bias mat.Vector) *mat.Dense {
+	result := new(mat.Dense)
+	result.Mul(weight, input)
+	// add bias
+	result.Apply(func(i, j int, v float64) float64 {
+		return v + bias.AtVec(i)
+	}, result)
+	// apply activation function
+	result.Apply(func(_, _ int, v float64) float64 {
+		return sigmoid(v)
+	}, result)
+	return result
+}
+
+// BackPropagate does the calculation of the gradient for each layer, and apply the alfa scalar to both weight and biases
 func (nn *NeuralNetwork) BackPropagate(expectedOutput *mat.Dense, alfa float64) {
+
+	outputLayer := nn.dataCache[nn.numberOfLayers]
+
+	currentError := mat.NewDense(outputLayer.RawMatrix().Rows, outputLayer.RawMatrix().Cols, nil)
+	currentError.Sub(outputLayer, expectedOutput)
+
 	for layerNumber := nn.numberOfLayers - 1; layerNumber >= 0; layerNumber-- {
 		layerOutput, layerInput := nn.dataCache[layerNumber+1], nn.dataCache[layerNumber]
 
@@ -69,8 +91,14 @@ func (nn *NeuralNetwork) BackPropagate(expectedOutput *mat.Dense, alfa float64) 
 
 		dC_dZ := mat.NewDense(numberOfOutputs, numberOfSamples, nil)
 
-		// step 1. calculate dC/dZ = 1/m * (A^[Li]-yˆ[i])
-		dC_dZ.Sub(layerOutput, expectedOutput)
+		// step 1. calculate dC/dZ = (current error) * sigmoid'(Z)
+		dC_dZ.CloneFrom(currentError)
+
+		dC_dZ.Apply(func(i, j int, v float64) float64 {
+			a := layerOutput.At(i, j)
+			return v * a * (1 - a)
+		}, dC_dZ)
+
 		dC_dZ.Scale(1/float64(numberOfSamples), dC_dZ)
 		if r, c := dC_dZ.Dims(); r != numberOfOutputs || c != numberOfSamples {
 			panic("Expected number of dimensions to be the same as the number of dimensions")
@@ -100,7 +128,7 @@ func (nn *NeuralNetwork) BackPropagate(expectedOutput *mat.Dense, alfa float64) 
 		dC_dB.ScaleVec(alfa, dC_dB)
 		nn.biases[layerNumber].SubVec(nn.biases[layerNumber], dC_dB)
 
-		expectedOutput = dC_dA
+		currentError = dC_dA
 	}
 }
 
@@ -120,21 +148,6 @@ func CalculateCost(predictionOutput *mat.Dense, correctAnswers *mat.Dense) float
 	summedLosses := floats.Sum(losses.RawMatrix().Data)
 
 	return summedLosses
-}
-
-// applyLayer performs the calculation for a neural network layer over an input
-func applyLayer(input mat.Matrix, weight mat.Matrix, bias mat.Vector) *mat.Dense {
-	result := new(mat.Dense)
-	result.Mul(weight, input)
-	// add bias
-	result.Apply(func(i, j int, v float64) float64 {
-		return v + bias.AtVec(i)
-	}, result)
-	// apply activation function
-	result.Apply(func(_, _ int, v float64) float64 {
-		return sigmoid(v)
-	}, result)
-	return result
 }
 
 func generateRandomMatrix(numberOfRows, numberOfColumns int) *mat.Dense {
